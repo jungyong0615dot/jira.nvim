@@ -1,5 +1,7 @@
 M = {}
 
+local Path = require("plenary.path")
+
 local status_map = {
 	[" "] = { "To Do", "TO DO", "TODO", "To DO", "TO Do" },
 	["-"] = { "In Progress", "IN PROGRESS", "INPROGRESS", "In PROGRESS", "IN Progress" },
@@ -7,7 +9,12 @@ local status_map = {
 	["x"] = { "Blocked", "BLOCKED", "WON'T DO", "ABANDONED", "ABANDON" },
 }
 
-M.issue_to_markdown = function(issue, comments)
+--- export issue json to markdown
+---@param issue table
+---@param comments table
+---@param path_save string
+---@return table
+M.issue_to_markdown = function(issue, comments, path_save)
 	local lines = {}
 
 	local attribute_lines = M.parse_attributes(issue)
@@ -15,17 +22,19 @@ M.issue_to_markdown = function(issue, comments)
 	local childs_lines = M.parse_childs(issue)
 	local comment_lines = M.parse_comments(comments)
 
-  for _, section_lines in ipairs({attribute_lines, desc_lines, childs_lines, comment_lines}) do
-    for _, line in ipairs(section_lines) do
-      table.insert(lines, line)
-    end
-  end
+	for _, section_lines in ipairs({ attribute_lines, desc_lines, childs_lines, comment_lines }) do
+		for _, line in ipairs(section_lines) do
+			table.insert(lines, line)
+		end
+	end
 
-	vim.fn.writefile(lines, M.opts.path_issues .. issue.key .. ".md")
+	vim.fn.writefile(lines, str(Path:new(path_save) / issue.key .. ".md"))
 	return lines
 end
 
-
+--- parse issue attributes
+---@param issue table
+---@return table
 M.parse_attributes = function(issue)
 	local parent_key = nil
 	if issue.fields.parent then
@@ -56,6 +65,9 @@ M.parse_attributes = function(issue)
 	return lines
 end
 
+--- parse issue sprint
+---@param issue table
+---@return string
 M.parse_issue_sprint = function(issue)
 	for _, field in pairs(issue["fields"]) do
 		if type(field) == "table" then
@@ -67,6 +79,9 @@ M.parse_issue_sprint = function(issue)
 	return ""
 end
 
+--- status string to icon
+---@param status string
+---@return string
 M.status_to_icon = function(status)
 	if status == nil or status == "" then
 		status = " "
@@ -81,6 +96,11 @@ M.status_to_icon = function(status)
 	return status
 end
 
+
+--- translate status icon to string
+---@param icon string
+---@param transitions table
+---@return string
 M.icon_to_status = function(icon, transitions)
 	for _, map in pairs(status_map[icon]) do
 		if transitions[map] ~= nil then
@@ -93,6 +113,54 @@ M.icon_to_status = function(icon, transitions)
 		end
 	end
 	return nil
+end
+
+
+--- parse issue description
+---@param issue table
+---@return table
+M.parse_description = function(issue)
+	local lines = { "<!-- description -->" }
+	if type(issue.fields.description) ~= "userdata" then
+		local mdlines = vim.split(issue.fields.description, "\n")
+		for _, mdline in ipairs(mdlines) do
+			table.insert(lines, mdline)
+		end
+	end
+	lines[#lines + 1] = "---"
+	return lines
+end
+
+--- parse issue childs
+---@param issue table
+---@return table
+M.parse_childs = function(issue)
+	local lines = { "<!-- childs -->" }
+	if issue.fields.subtasks ~= nil then
+		for _, v in ipairs(issue.fields.subtasks) do
+			line = string.format("- [%s][%s]/'%s'", M.status_to_icon(v.fields.status.name), v.key, v.fields.summary)
+			table.insert(lines, line)
+		end
+	end
+	lines[#lines + 1] = "---"
+	return lines
+end
+
+--- parse issue comments
+---@param comments table
+---@return table
+M.parse_comments = function(comments)
+	local lines = { "<!-- comments -->" }
+	for _, comment in ipairs(comments) do
+		line = string.format("### [ID-%s][%s]: %s", comment.id, comment.author.displayName, comment.created)
+		table.insert(lines, line)
+		for _, ll in ipairs(vim.split(comment.body, "\n")) do
+			table.insert(lines, ll)
+		end
+	end
+
+	lines[#lines + 1] = "---"
+	return lines
 end
 
 return M
