@@ -4,6 +4,9 @@ local Job = require("plenary.job")
 local Path = require("plenary.path")
 local curl = require("custom_curl")
 local defaults = require'jira.defaults'
+local jira = require("jira")
+local jui = require("jira.ui")
+
 
 M.open_issue = function(space, issue_id)
 
@@ -11,7 +14,7 @@ M.open_issue = function(space, issue_id)
   local comments = nil
 
 	job_content = curl.get(string.format("https://%s/rest/api/2/issue/%s?expand=renderedFields", space, issue_id), {
-		auth = string.format("%s:%s", M.configs.spaces[space]["email"], M.configs.spaces[space]["token"]),
+		auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
 		accept = "application/json",
 		callback = vim.schedule_wrap(function(out)
 			issue = vim.json.decode(out.body)
@@ -19,11 +22,13 @@ M.open_issue = function(space, issue_id)
 	})
 
   job_comments = curl.get(string.format("https://%s/rest/api/2/issue/%s/comment", space, issue_id), {
-    auth = string.format("%s:%s", M.configs.spaces[space]["email"], M.configs.spaces[space]["token"]),
+    auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
     accept = "application/json",
     callback = vim.schedule_wrap(function(out)
       comments = vim.json.decode(out.body)
-      vim.pretty_print(comments)
+      local lines = jui.issue_to_markdown(issue, comments)
+      jui.open_float(lines)
+
     end),
   })
 

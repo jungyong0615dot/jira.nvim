@@ -1,6 +1,7 @@
 M = {}
 
 local Path = require("plenary.path")
+local jira = require("jira")
 
 local status_map = {
 	[" "] = { "To Do", "TO DO", "TODO", "To DO", "TO Do" },
@@ -12,9 +13,8 @@ local status_map = {
 --- export issue json to markdown
 ---@param issue table
 ---@param comments table
----@param path_save string
 ---@return table
-M.issue_to_markdown = function(issue, comments, path_save)
+M.issue_to_markdown = function(issue, comments)
 	local lines = {}
 
 	local attribute_lines = M.parse_attributes(issue)
@@ -28,7 +28,7 @@ M.issue_to_markdown = function(issue, comments, path_save)
 		end
 	end
 
-	vim.fn.writefile(lines, str(Path:new(path_save) / issue.key .. ".md"))
+	vim.fn.writefile(lines, (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
 	return lines
 end
 
@@ -60,6 +60,7 @@ M.parse_attributes = function(issue)
 		"sprint:" .. M.parse_issue_sprint(issue),
 		"space:" .. string.match(issue.self, "https://(.*)/rest/api/2/issue/.*"),
 		"priority:" .. issue.fields.priority.name,
+    "",
 		"---",
 	}
 	return lines
@@ -161,6 +162,32 @@ M.parse_comments = function(comments)
 
 	lines[#lines + 1] = "---"
 	return lines
+end
+
+M.open_float = function(lines)
+	local width = vim.api.nvim_get_option("columns")
+	local height = vim.api.nvim_get_option("lines")
+	local win_height = math.ceil(height * 0.9 - 4)
+	local win_width = math.ceil(width * 0.9)
+	local row = math.ceil((height - win_height) / 2 - 1)
+	local col = math.ceil((width - win_width) / 2)
+	local buf = vim.api.nvim_create_buf(true, true)
+
+	vim.api.nvim_buf_set_option(buf, "filetype", "markdown")
+	vim.b[buf].parent_buf = vim.api.nvim_get_current_buf()
+	local _ = vim.api.nvim_open_win(buf, true, {
+		style = "minimal",
+		relative = "editor",
+		row = row,
+		col = col,
+		width = win_width,
+		height = win_height,
+		border = "rounded",
+	})
+	vim.w.is_floating_scratch = true
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+
+	return buf
 end
 
 return M
