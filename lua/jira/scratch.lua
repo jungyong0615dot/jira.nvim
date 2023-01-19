@@ -27,7 +27,11 @@ M.open_issue = function(space, issue_id)
     callback = vim.schedule_wrap(function(out)
       comments = vim.json.decode(out.body)
       local lines = jui.issue_to_markdown(issue, comments)
+
       jui.open_float(lines)
+      vim.cmd("w " .. (Path:new(jira.opts.path_issues) / issue.key .. ".md!"))
+
+			require("notify")("Issue update done", "info", { { title = "Update done" } })
 
     end),
   })

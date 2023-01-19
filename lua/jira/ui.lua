@@ -15,11 +15,15 @@ local status_map = {
 ---@param comments table
 ---@return table
 M.issue_to_markdown = function(issue, comments)
+
+  -- vim.fn.writefile(vim.split(vim.json.encode(issue), '\n'), "tmp_issue.json")
+
 	local lines = {}
 
 	local attribute_lines = M.parse_attributes(issue)
 	local desc_lines = M.parse_description(issue)
 	local childs_lines = M.parse_childs(issue)
+  -- TODO: issue already incudes comments
 	local comment_lines = M.parse_comments(comments)
 
 	for _, section_lines in ipairs({ attribute_lines, desc_lines, childs_lines, comment_lines }) do
@@ -28,7 +32,6 @@ M.issue_to_markdown = function(issue, comments)
 		end
 	end
 
-	vim.fn.writefile(lines, (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
 	return lines
 end
 
@@ -152,6 +155,10 @@ end
 ---@return table
 M.parse_comments = function(comments)
 	local lines = { "<!-- comments -->" }
+
+
+  
+
 	for _, comment in ipairs(comments) do
 		line = string.format("### [ID-%s][%s]: %s", comment.id, comment.author.displayName, comment.created)
 		table.insert(lines, line)
@@ -185,6 +192,7 @@ M.open_float = function(lines)
 		border = "rounded",
 	})
 	vim.w.is_floating_scratch = true
+
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
 	return buf
