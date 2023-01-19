@@ -37,6 +37,7 @@ M.setup = function(opts)
 		return
 	end
 	M.configs = vim.json.decode(vim.fn.readfile(M.opts.config_path))
+  vim.notify("loaded config.")
 
 	if M.configs.spaces == nil then
 		vim.notify("Jira space is not defined. set it with token.", 4)
