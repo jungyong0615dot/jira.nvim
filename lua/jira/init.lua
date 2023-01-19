@@ -1,5 +1,8 @@
 local M = {}
 
+local Path = require("plenary.path")
+local defaults = require'jira.defaults'
+
 -- local actions = require("telescope.actions")
 -- local actions_state = require("telescope.actions.state")
 -- local finders = require("telescope.finders")
@@ -1051,24 +1054,25 @@ local M = {}
 -- 	return response, response_code
 -- end
 --
--- M.setup = function(opts)
--- 	M.opts = setmetatable(opts or {}, { __index = defaults })
--- 	M.initialized = true
---
--- 	if not Path:new(M.opts.config_path):exists() then
--- 		vim.notify("Jira is not initialized; please check the existance of config file.", 4)
--- 		return
--- 	end
--- 	M.configs = vim.json.decode(vim.fn.readfile(M.opts.config_path))
---
--- 	if M.configs.spaces == nil then
--- 		vim.notify("Jira space is not defined. set it with token.", 4)
--- 		return
--- 	end
---
--- 	if not Path:new(M.opts.path_issues):is_dir() then
--- 		Path:new(M.opts.path_issues):mkdir()
--- 	end
--- end
+
+M.setup = function(opts)
+	M.opts = setmetatable(opts or {}, { __index = defaults })
+	M.initialized = true
+
+	if not Path:new(M.opts.config_path):exists() then
+		vim.notify("Jira is not initialized; please check the existance of config file.", 4)
+		return
+	end
+	M.configs = vim.json.decode(table.concat(vim.fn.readfile(M.opts.config_path), ""))
+
+	if M.configs.spaces == nil then
+		vim.notify("Jira space is not defined. set it with token.", 4)
+		return
+	end
+
+	if not Path:new(M.opts.path_issues):is_dir() then
+		Path:new(M.opts.path_issues):mkdir()
+	end
+end
 
 return M

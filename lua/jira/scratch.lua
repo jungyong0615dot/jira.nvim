@@ -3,6 +3,7 @@ local M = {}
 local Job = require("plenary.job")
 local Path = require("plenary.path")
 local curl = require("custom_curl")
+local defaults = require'jira.defaults'
 
 M.open_issue = function(space, issue_id)
 
@@ -22,31 +23,12 @@ M.open_issue = function(space, issue_id)
     accept = "application/json",
     callback = vim.schedule_wrap(function(out)
       comments = vim.json.decode(out.body)
+      vim.pretty_print(comments)
     end),
   })
 
-  Job.chain(job_content, job_comments):start()
+  Job.chain(job_content, job_comments)
 end
 
-M.setup = function(opts)
-	M.opts = setmetatable(opts or {}, { __index = defaults })
-	M.initialized = true
-
-	if not Path:new(M.opts.config_path):exists() then
-		vim.notify("Jira is not initialized; please check the existance of config file.", 4)
-		return
-	end
-	M.configs = vim.json.decode(vim.fn.readfile(M.opts.config_path))
-  vim.notify("loaded config.")
-
-	if M.configs.spaces == nil then
-		vim.notify("Jira space is not defined. set it with token.", 4)
-		return
-	end
-
-	if not Path:new(M.opts.path_issues):is_dir() then
-		Path:new(M.opts.path_issues):mkdir()
-	end
-end
 
 return M
