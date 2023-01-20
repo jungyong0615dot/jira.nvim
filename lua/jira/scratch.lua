@@ -36,27 +36,68 @@ M.open_issue = function(space, issue_id)
 	Job.chain(job_content, job_comments)
 end
 
-M.query_issues = function(space, query, callback)
+M.query_issues = function(space, query)
 	local issues = nil
 	local job = curl.get(string.format("https://%s/rest/api/2/search?jql=%s", space, query), {
 		auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
 		accept = "application/json",
 		callback = vim.schedule_wrap(function(out)
 			issues = vim.json.decode(out.body)
-      jui.issues_picker(issues)
-
-			callback(issues)
+			jui.issues_picker(issues)
 		end),
 	}):start()
 end
 
 
+M.create_issue = function(space, body)
+	local job = curl.post(string.format("https://%s/rest/api/2/issue/", space), {
 
-
-
-M.test = function() 
-  jui.open_float(jui.get_issue_template(jira.configs.templates[2]))
+		auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
+		headers = {
+			content_type = "application/json",
+		},
+		body = body,
+		callback = vim.schedule_wrap(function(out)
+			local issue = vim.json.decode(out.body)
+		end),
+	}):start()
 end
 
+
+M.delete_issue = function(space, issue_id)
+  local job = curl.delete(string.format("https://%s/rest/api/2/issue/%s", space, issue_id), {
+		auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
+    accept = "application/json",
+    callback = vim.schedule_wrap(function(out)
+      if out.status == 204 then
+        vim.notify("Issue deleted", "info", { title = "Delete done" })
+      else
+        vim.notify("Error deleting issue", "error", { title = "Delete error" })
+      end
+    end),
+  }):start()
+end
+
+
+
+
+
+
+
+
+
+
+M.test = function()
+end
+
+M.test2 = function()
+end
+
+	-- jui.open_float(jui.get_issue_template(jira.configs.templates[2]))
+--
+	-- local tmp1 = jui.read_issue_buf()
+	-- M.create_issue("jungyong0615dot.atlassian.net", tmp1.body)
+	-- vim.pretty_print(tmp1)
+-- M.delete_issue("jungyong0615dot.atlassian.net", 'PRD-41')
 
 return M

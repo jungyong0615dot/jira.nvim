@@ -278,7 +278,7 @@ M.get_issue_template = function(info)
   local attribute_lines = {}
   for _, attribute in ipairs({ 'summary', 'project', 'parent', 'status', 'sprint', 'space', 'priority' }) do
 
-    local line = string.format("%s: %s", attribute, fillstr(info['attribute']))
+    local line = string.format("%s:%s", attribute, fillstr(info[attribute]))
     table.insert(attribute_lines, line)
   end
 
@@ -295,6 +295,112 @@ M.get_issue_template = function(info)
 		"<!-- attributes -->",
     "key:",
 	}, attribute_lines)
+
+end
+
+-- generate adf table from markdown text
+---@param lines 
+---@return 
+M.make_adf = function(lines)
+	if lines[#lines] ~= "" then
+		lines[#lines + 1] = " "
+	end
+
+	local description = { type = "doc", version = 1, content = {} }
+	local bullet_list = { type = "bulletList", content = {} }
+
+	for _, line in ipairs(lines) do
+		if string.match(line, "\\") then
+			line = string.gsub(line, "\\", "")
+		end
+		if string.sub(line, 1, 2) == "* " then
+			table.insert(bullet_list.content, {
+				type = "listItem",
+				content = { { type = "paragraph", content = { { type = "text", text = line:sub(3) } } } },
+			})
+		else
+			if #bullet_list.content > 0 then
+				table.insert(description.content, bullet_list)
+				bullet_list = { type = "bulletList", content = {} }
+			end
+			if line == "" then
+				line = " "
+			end
+			table.insert(description.content, { type = "paragraph", content = { { type = "text", text = line } } })
+		end
+	end
+	return description
+end
+
+
+--- parse single child line to table
+---@param child_line 
+---@return 
+M.parse_child_line = function(child_line)
+	local lines = vim.split(child_line, "/")
+	local child_attrs = lines[1]:sub(3)
+	local attrs = vim.split(child_attrs, "]")
+	local fetched_attrs = {}
+	for _, attr in ipairs(attrs) do
+		table.insert(fetched_attrs, string.match(attr, "%[(.*)"))
+	end
+	if #fetched_attrs == 0 or fetched_attrs == nil then
+		return nil
+	end
+	return { key = fetched_attrs[2], status = fetched_attrs[1], summary = lines[2]:sub(2, -2) }
+end
+
+--- read buffer and parse. return table that includes body, childs, space 
+---@param bufnr 
+M.read_issue_buf = function(bufnr)
+	bufnr = bufnr or 0
+  
+	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+	local sections = {}
+	local section = {}
+	for _, line in ipairs(lines) do
+		if string.match(line, "%-%-%-") then
+			table.insert(sections, section)
+			section = {}
+		else
+			if string.match(line, "%!%-%-") == nil then
+				table.insert(section, line)
+			end
+		end
+	end
+
+	local attributes = {}
+	for _, line in ipairs(sections[1]) do
+		attr = vim.split(line, ":")
+		attributes[attr[1]] = attr[2]
+	end
+
+	local childs = {}
+	if #sections[3] > 0 then
+		for _, line in ipairs(sections[3]) do
+			table.insert(childs, M.parse_child_line(line))
+		end
+	end
+  
+  -- body that can be used for newly creating issue
+	local body = vim.json.encode({
+		fields = {
+			project = {
+				key = attributes["project"],
+			},
+			summary = attributes["summary"],
+			issuetype = {
+				name = "Task",
+			},
+			-- parent = {
+			-- 	key = attributes["parent"],
+			-- },
+			assignee = nil,
+			description = table.concat(sections[2], "\n"),
+		},
+	})
+  
+	return { attributes = attributes, description = table.concat(sections[2], "\n"), childs = childs, body=body}
 
 end
 
