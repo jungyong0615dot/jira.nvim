@@ -1,5 +1,14 @@
 M = {}
 
+local actions = require("telescope.actions")
+local actions_state = require("telescope.actions.state")
+local finders = require("telescope.finders")
+local pickers = require("telescope.pickers")
+local previewers = require("telescope.previewers")
+local conf = require("telescope.config").values
+local ts_utils = require("telescope.utils")
+local defaulter = ts_utils.make_default_callable
+
 local Path = require("plenary.path")
 local jira = require("jira")
 
@@ -10,20 +19,27 @@ local status_map = {
 	["x"] = { "Blocked", "BLOCKED", "WON'T DO", "ABANDONED", "ABANDON" },
 }
 
+function table.append(t1, t2)
+	for i = 1, #t2 do
+		t1[#t1 + 1] = t2[i]
+	end
+	return t1
+end
+
+
 --- export issue json to markdown
 ---@param issue table
 ---@param comments table
 ---@return table
 M.issue_to_markdown = function(issue, comments)
-
-  -- vim.fn.writefile(vim.split(vim.json.encode(issue), '\n'), "tmp_issue.json")
+	-- vim.fn.writefile(vim.split(vim.json.encode(issue), '\n'), "tmp_issue.json")
 
 	local lines = {}
 
 	local attribute_lines = M.parse_attributes(issue)
 	local desc_lines = M.parse_description(issue)
 	local childs_lines = M.parse_childs(issue)
-  -- TODO: issue already incudes comments
+	-- TODO: issue already incudes comments
 	local comment_lines = M.parse_comments(comments)
 
 	for _, section_lines in ipairs({ attribute_lines, desc_lines, childs_lines, comment_lines }) do
@@ -63,7 +79,7 @@ M.parse_attributes = function(issue)
 		"sprint:" .. M.parse_issue_sprint(issue),
 		"space:" .. string.match(issue.self, "https://(.*)/rest/api/2/issue/.*"),
 		"priority:" .. issue.fields.priority.name,
-    "",
+		"",
 		"---",
 	}
 	return lines
@@ -100,7 +116,6 @@ M.status_to_icon = function(status)
 	return status
 end
 
-
 --- translate status icon to string
 ---@param icon string
 ---@param transitions table
@@ -118,7 +133,6 @@ M.icon_to_status = function(icon, transitions)
 	end
 	return nil
 end
-
 
 --- parse issue description
 ---@param issue table
@@ -139,6 +153,10 @@ end
 ---@param issue table
 ---@return table
 M.parse_childs = function(issue)
+	if issue == nil or issue.fields == nil or issue.fields.subtasks == nil then
+		return {}
+	end
+
 	local lines = { "<!-- childs -->" }
 	if issue.fields.subtasks ~= nil then
 		for _, v in ipairs(issue.fields.subtasks) do
@@ -154,10 +172,11 @@ end
 ---@param comments table
 ---@return table
 M.parse_comments = function(comments)
+	if comments == nil then
+		return {}
+	end
+
 	local lines = { "<!-- comments -->" }
-
-
-  
 
 	for _, comment in ipairs(comments) do
 		line = string.format("### [ID-%s][%s]: %s", comment.id, comment.author.displayName, comment.created)
@@ -193,9 +212,90 @@ M.open_float = function(lines)
 	})
 	vim.w.is_floating_scratch = true
 
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
 
 	return buf
+end
+
+local issue_previewer = defaulter(function(opts)
+	return previewers.new_buffer_previewer({
+		title = "Description",
+		get_buffer_by_name = function(_, entry)
+			return entry.value
+		end,
+		define_preview = function(self, entry)
+			local bufnr = self.state.bufnr
+			vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, entry.description)
+			vim.api.nvim_buf_set_option(bufnr, "filetype", "markdown")
+		end,
+	})
+end)
+
+M.issues_picker = function(issues)
+	local markdown_issues = {}
+
+	for _, issue in ipairs(issues.issues) do
+		table.insert(markdown_issues, { key = issue.key, text = M.issue_to_markdown(issue), tmp = "hi" })
+	end
+
+	pickers
+		.new({}, {
+      prompt_title = "Issues picker",
+			results_title = "contents",
+			finder = finders.new_table({
+				results = markdown_issues,
+				entry_maker = function(entry)
+					return {
+						value = entry.key,
+						display = entry.key,
+						description = entry.text,
+						ordinal = entry.key,
+					}
+				end,
+			}),
+			previewer = issue_previewer.new({}),
+			attach_mappings = function(prompt_bufnr)
+				actions.select_default:replace(function()
+					local selection = actions_state.get_selected_entry()
+					actions.close(prompt_bufnr)
+					M.open_float(selection.description)
+				end)
+				return true
+			end,
+		})
+		:find()
+	return
+end
+
+
+
+local fillstr = function(text) 
+  return text or ""
+end
+
+M.get_issue_template = function(info)
+
+  local attribute_lines = {}
+  for _, attribute in ipairs({ 'summary', 'project', 'parent', 'status', 'sprint', 'space', 'priority' }) do
+
+    local line = string.format("%s: %s", attribute, fillstr(info['attribute']))
+    table.insert(attribute_lines, line)
+  end
+
+  attribute_lines = table.append(attribute_lines, {
+    "",
+    "---",
+    "<!-- description -->",
+    "---",
+    "<!-- childs -->",
+    "---",
+  })
+
+	return table.append({
+		"<!-- attributes -->",
+    "key:",
+	}, attribute_lines)
+
 end
 
 return M
