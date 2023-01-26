@@ -26,7 +26,6 @@ function table.append(t1, t2)
 	return t1
 end
 
-
 --- export issue json to markdown
 ---@param issue table
 ---@param comments table
@@ -243,7 +242,7 @@ M.issues_picker = function(issues)
 
 	pickers
 		.new({}, {
-      prompt_title = "Issues picker",
+			prompt_title = "Issues picker",
 			results_title = "contents",
 			finder = finders.new_table({
 				results = markdown_issues,
@@ -270,41 +269,35 @@ M.issues_picker = function(issues)
 	return
 end
 
-
-
-local fillstr = function(text) 
-  return text or ""
+local fillstr = function(text)
+	return text or ""
 end
 
 M.get_issue_template = function(info)
+	local attribute_lines = {}
+	for _, attribute in ipairs({ "summary", "project", "parent", "status", "sprint", "space", "priority", "updated" }) do
+		local line = string.format("%s:%s", attribute, fillstr(info[attribute]))
+		table.insert(attribute_lines, line)
+	end
 
-  local attribute_lines = {}
-  for _, attribute in ipairs({ 'summary', 'project', 'parent', 'status', 'sprint', 'space', 'priority', 'updated' }) do
-
-    local line = string.format("%s:%s", attribute, fillstr(info[attribute]))
-    table.insert(attribute_lines, line)
-  end
-
-  attribute_lines = table.append(attribute_lines, {
-    "",
-    "---",
-    "<!-- description -->",
-    "---",
-    "<!-- childs -->",
-    "---",
-  })
+	attribute_lines = table.append(attribute_lines, {
+		"",
+		"---",
+		"<!-- description -->",
+		"---",
+		"<!-- childs -->",
+		"---",
+	})
 
 	return table.append({
 		"<!-- attributes -->",
-    "key:",
+		"key:",
 	}, attribute_lines)
-
 end
 
-
 --- parse single child line to table
----@param child_line 
----@return 
+---@param child_line
+---@return
 M.parse_child_line = function(child_line)
 	local lines = vim.split(child_line, "/")
 	local child_attrs = lines[1]:sub(3)
@@ -319,11 +312,9 @@ M.parse_child_line = function(child_line)
 	return { key = fetched_attrs[2], status = fetched_attrs[1], summary = lines[2]:sub(2, -2) }
 end
 
-
---- parse issue lines. return table that includes body, childs, space 
+--- parse issue lines. return table that includes body, childs, space
 ---@param lines
 M.markdown_to_issue = function(lines)
-
 	local sections = {}
 	local section = {}
 	for _, line in ipairs(lines) do
@@ -338,14 +329,14 @@ M.markdown_to_issue = function(lines)
 	end
 
 	local attributes = {}
-  local val = nil
+	local val = nil
 	for _, line in ipairs(sections[1]) do
 		attr = vim.split(line, ":")
-    if attr[1] == 'status' then
-      val = string.sub(attr[2], 2, 2)
-    else
-      val = attr[2]
-    end
+		if attr[1] == "status" then
+			val = string.sub(attr[2], 2, 2)
+		else
+			val = attr[2]
+		end
 		attributes[attr[1]] = val
 	end
 
@@ -355,8 +346,8 @@ M.markdown_to_issue = function(lines)
 			table.insert(childs, M.parse_child_line(line))
 		end
 	end
-  
-  -- body that can be used for newly creating issue
+
+	-- body that can be used for newly creating issue
 	local body = vim.json.encode({
 		fields = {
 			project = {
@@ -373,9 +364,8 @@ M.markdown_to_issue = function(lines)
 			description = table.concat(sections[2], "\n"),
 		},
 	})
-  
-	return { attributes = attributes, description = table.concat(sections[2], "\n"), childs = childs, body=body}
-end
 
+	return { attributes = attributes, description = table.concat(sections[2], "\n"), childs = childs, body = body }
+end
 
 return M
