@@ -161,14 +161,36 @@ M.update_changed_fields = function(space, issue_id)
 						vim.notify("Error updating issue", "error", { title = "Update error" })
 					end
 				end),
-			}):start()
+			})
 
 			-- updae status
+      local job_transit = nil
 			if local_issue.attributes["status"] ~= jui.status_to_icon(remote_issue.fields.status.name) then
 				job_transit = M.transit_issue(space, issue_id, local_issue.attributes["status"])
 			end
+      
+
+  local job_redraw = curl.get(string.format("https://%s/rest/api/2/issue/%s?expand=renderedFields", space, issue_id), {
+    auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
+    accept = "application/json",
+    callback = vim.schedule_wrap(function(out)
+      issue = vim.json.decode(out.body)
+      comments = issue.fields.comment.comments
+      local newlines = jui.issue_to_markdown(issue, comments)
+
+      vim.notify("Issue " .. issue.key .. " redrawn")
+      vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
+      
+      
+    end),
+  })
+  
+    Job.chain(job_update, job_transit, job_redraw)
+      
 		end),
 	}):start()
+  
+  
 end
 
 
@@ -177,6 +199,7 @@ end
 ---@param issue_id 
 ---@param target_status: str. Name like "To Do" or icon like "-" defined in ui.status_map
 M.transit_issue = function(space, issue_id, target_status)
+  
 	local prj = string.match(issue_id, "[^-]+")
 	local map_by_prj =
 		vim.json.decode(table.concat(vim.fn.readfile(jira.opts.transits_path), ""))
@@ -193,7 +216,7 @@ M.transit_issue = function(space, issue_id, target_status)
 		local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
 		local transition_id = map_by_prj[prj][prj_status]
 
-		local job = curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
+		return curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
 			auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
 			headers = {
 				content_type = "application/json",
@@ -211,9 +234,10 @@ M.transit_issue = function(space, issue_id, target_status)
 					vim.notify("Error in issue transition", "error", { title = "Update error" })
 				end
 			end),
-		}):start()
+		})
+    
 	else
-		_ = curl.get(string.format("https://%s/rest/api/3/issue/%s/transitions", space, issue_id), {
+		return curl.get(string.format("https://%s/rest/api/3/issue/%s/transitions", space, issue_id), {
 			auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
 			accept = "application/json",
 			callback = vim.schedule_wrap(function(out)
@@ -232,7 +256,7 @@ M.transit_issue = function(space, issue_id, target_status)
         local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
         local transition_id = map_by_prj[prj][prj_status]
 
-        local job = curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
+        local _ = curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
           auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
           headers = {
             content_type = "application/json",
@@ -253,16 +277,13 @@ M.transit_issue = function(space, issue_id, target_status)
           end),
         }):start()
 			end),
-		}):start()
+		})
+
 	end
 end
 
 M.test = function()
   M.open_issue("jungyong0615dot.atlassian.net", "PRD-155")
-	-- local issue_id = "PRD-155"
-	-- local status = "In Progress"
-	--
-	-- M.transit_issue("jungyong0615dot.atlassian.net", issue_id, status)
 end
 
 M.test2 = function()
@@ -289,4 +310,9 @@ end
 	-- M.get_possible_transits("jungyong0615dot.atlassian.net", "PRD-155")
 
 
+	-- local issue_id = "PRD-155"
+	-- local status = "In Progress"
+	--
+	-- M.transit_issue("jungyong0615dot.atlassian.net", issue_id, status)
+-- 
 return M
