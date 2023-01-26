@@ -79,6 +79,9 @@ M.parse_attributes = function(issue)
 		"sprint:" .. M.parse_issue_sprint(issue),
 		"space:" .. string.match(issue.self, "https://(.*)/rest/api/2/issue/.*"),
 		"priority:" .. issue.fields.priority.name,
+		-- "updated:" .. issue.fields.updated,
+		"updated:" .. string.gsub(issue.fields.updated, "%:", "_"),
+
 		"",
 		"---",
 	}
@@ -276,7 +279,7 @@ end
 M.get_issue_template = function(info)
 
   local attribute_lines = {}
-  for _, attribute in ipairs({ 'summary', 'project', 'parent', 'status', 'sprint', 'space', 'priority' }) do
+  for _, attribute in ipairs({ 'summary', 'project', 'parent', 'status', 'sprint', 'space', 'priority', 'updated' }) do
 
     local line = string.format("%s:%s", attribute, fillstr(info[attribute]))
     table.insert(attribute_lines, line)
@@ -298,40 +301,6 @@ M.get_issue_template = function(info)
 
 end
 
--- generate adf table from markdown text
----@param lines 
----@return 
-M.make_adf = function(lines)
-	if lines[#lines] ~= "" then
-		lines[#lines + 1] = " "
-	end
-
-	local description = { type = "doc", version = 1, content = {} }
-	local bullet_list = { type = "bulletList", content = {} }
-
-	for _, line in ipairs(lines) do
-		if string.match(line, "\\") then
-			line = string.gsub(line, "\\", "")
-		end
-		if string.sub(line, 1, 2) == "* " then
-			table.insert(bullet_list.content, {
-				type = "listItem",
-				content = { { type = "paragraph", content = { { type = "text", text = line:sub(3) } } } },
-			})
-		else
-			if #bullet_list.content > 0 then
-				table.insert(description.content, bullet_list)
-				bullet_list = { type = "bulletList", content = {} }
-			end
-			if line == "" then
-				line = " "
-			end
-			table.insert(description.content, { type = "paragraph", content = { { type = "text", text = line } } })
-		end
-	end
-	return description
-end
-
 
 --- parse single child line to table
 ---@param child_line 
@@ -350,12 +319,11 @@ M.parse_child_line = function(child_line)
 	return { key = fetched_attrs[2], status = fetched_attrs[1], summary = lines[2]:sub(2, -2) }
 end
 
---- read buffer and parse. return table that includes body, childs, space 
----@param bufnr 
-M.read_issue_buf = function(bufnr)
-	bufnr = bufnr or 0
-  
-	local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+
+--- parse issue lines. return table that includes body, childs, space 
+---@param lines
+M.markdown_to_issue = function(lines)
+
 	local sections = {}
 	local section = {}
 	for _, line in ipairs(lines) do
@@ -370,9 +338,15 @@ M.read_issue_buf = function(bufnr)
 	end
 
 	local attributes = {}
+  local val = nil
 	for _, line in ipairs(sections[1]) do
 		attr = vim.split(line, ":")
-		attributes[attr[1]] = attr[2]
+    if attr[1] == 'status' then
+      val = string.sub(attr[2], 2, 2)
+    else
+      val = attr[2]
+    end
+		attributes[attr[1]] = val
 	end
 
 	local childs = {}
@@ -401,7 +375,7 @@ M.read_issue_buf = function(bufnr)
 	})
   
 	return { attributes = attributes, description = table.concat(sections[2], "\n"), childs = childs, body=body}
-
 end
+
 
 return M
