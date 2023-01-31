@@ -6,6 +6,7 @@ local curl = require("custom_curl")
 local defaults = require("jira.defaults")
 local jira = require("jira")
 local jui = require("jira.ui")
+local r = require("jira.rest")
 
 local function convert_time_format(str, from, to)
 	local year, month, day, hour, min, sec, msec, tz = string.match(str, from)
@@ -23,60 +24,42 @@ M.open_issue = function(space, issue_id)
 	local issue = nil
 	local comments = nil
 
-	job_content = curl.get(string.format("https://%s/rest/api/2/issue/%s?expand=renderedFields", space, issue_id), {
-		auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
-		accept = "application/json",
-		callback = vim.schedule_wrap(function(out)
-			issue = vim.json.decode(out.body)
-			comments = issue.fields.comment.comments
-			local lines = jui.issue_to_markdown(issue, comments)
+	r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
+		issue = vim.json.decode(out.body)
+		comments = issue.fields.comment.comments
+		local lines = jui.issue_to_markdown(issue, comments)
 
-			jui.open_float(lines)
-			vim.cmd("w! " .. (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
+		jui.open_float(lines)
+		vim.cmd("w! " .. (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
 
-			vim.notify("Issue " .. issue.key .. " opened")
-		end),
-	}):start()
+		vim.notify("Issue " .. issue.key .. " opened")
+	end):start()
 end
 
 M.query_issues = function(space, query)
 	local issues = nil
-	local job = curl.get(string.format("https://%s/rest/api/2/search?jql=%s", space, query), {
-		auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
-		accept = "application/json",
-		callback = vim.schedule_wrap(function(out)
-			issues = vim.json.decode(out.body)
-			jui.issues_picker(issues)
-		end),
-	}):start()
+
+	r.get(space, string.format("search?jql=%s", query), function(out)
+		issues = vim.json.decode(out.body)
+		jui.issues_picker(issues)
+	end):start()
 end
 
 M.create_issue = function(space, body)
-	local job = curl.post(string.format("https://%s/rest/api/2/issue/", space), {
-
-		auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-		headers = {
-			content_type = "application/json",
-		},
-		body = body,
-		callback = vim.schedule_wrap(function(out)
-			local issue = vim.json.decode(out.body)
-		end),
-	}):start()
+	r.post(space, "issue/", body, function(out)
+		local issue = vim.json.decode(out.body)
+		vim.notify("Issue " .. issue.key .. " created", "info", { title = "Create done" })
+	end)
 end
 
 M.delete_issue = function(space, issue_id)
-	local job = curl.delete(string.format("https://%s/rest/api/2/issue/%s", space, issue_id), {
-		auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-		accept = "application/json",
-		callback = vim.schedule_wrap(function(out)
-			if out.status == 204 then
-				vim.notify("Issue deleted", "info", { title = "Delete done" })
-			else
-				vim.notify("Error deleting issue", "error", { title = "Delete error" })
-			end
-		end),
-	}):start()
+	r.delete(space, string.format("issue/%s", issue_id), function(out)
+		if out.status == 204 then
+			vim.notify("Issue deleted", "info", { title = "Delete done" })
+		else
+			vim.notify("Error deleting issue", "error", { title = "Delete error" })
+		end
+	end):start()
 end
 
 --- Update issue with given body
@@ -85,20 +68,83 @@ end
 ---@param body
 ---@param out
 M.update_issue = function(space, issue_id, body)
-	local job_write = curl.put(string.format("https://%s/rest/api/2/issue/%s", space, issue_id), {
-		auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-		headers = {
-			content_type = "application/json",
-		},
-		body = body,
-		callback = vim.schedule_wrap(function(out)
-			if out.status == 204 then
-				vim.notify("Issue updated", "info", { title = "Update done" })
-			else
-				vim.notify("Error updating issue", "error", { title = "Update error" })
+	r.put(space, string.format("issue/%s", issue_id), body, function(out)
+		if out.status == 204 then
+			vim.notify("Issue updated", "info", { title = "Update done" })
+		else
+			vim.notify("Error updating issue", "error", { title = "Update error" })
+		end
+	end):start()
+end
+
+--- Transit issue with given issue_id to given status
+---@param space
+---@param issue_id
+---@param target_status: str. Name like "To Do" or icon like "-" defined in ui.status_map
+M.transit_issue = function(space, issue_id, target_status)
+	local prj = string.match(issue_id, "[^-]+")
+	local map_by_prj = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.transits_path), ""))
+
+	local target_icon = nil
+	if target_status:len() < 2 then
+		target_icon = target_status
+	else
+		target_icon = jui.status_to_icon(target_status)
+	end
+
+	local post_transit = function(id, issue)
+		return r.post(
+			space,
+			string.format("issue/%s/transitions", issue),
+			vim.json.encode({
+				transition = {
+					id = id,
+				},
+			}),
+			function(out)
+				if out.status == 204 then
+					vim.notify("issue transition success", "info", { title = "Update done" })
+				else
+					vim.notify("Error in issue transition", "error", { title = "Update error" })
+				end
 			end
-		end),
-	}):start()
+		)
+	end
+
+	if map_by_prj[prj] ~= nil then
+		-- TODO: make it as an function
+		local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
+		local transition_id = map_by_prj[prj][prj_status]
+
+		return post_transit(transition_id, issue_id)
+	else
+		return r.get(space, string.format("issue/%s/transitions", issue_id), function(out)
+			local response_table = vim.json.decode(out.body)
+			local transitions = {}
+			for _, v in ipairs(response_table.transitions) do
+				transitions[v.name] = v.id
+			end
+			map_by_prj[prj] = transitions
+
+			vim.fn.writefile(vim.split(vim.json.encode(map_by_prj), "\n"), jira.opts.transits_path)
+
+			local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
+			local transition_id = map_by_prj[prj][prj_status]
+			post_transit(transition_id, issue_id)
+		end)
+	end
+end
+
+M.get_issue_types = function(space, project)
+	r.get(space, string.format("issuetype/project?projectId=%s", project), function(out)
+		local response_table = vim.json.decode(out.body)
+		local issue_types = {}
+		for _, v in ipairs(response_table) do
+			issue_types[v.name] = v.id
+			-- table.insert(issue_types, {}v.name)
+		end
+		vim.fn.writefile(vim.split(vim.json.encode(issue_types), "\n"), jira.opts.issuetypes_path)
+	end):start()
 end
 
 --- Update issue with given issue_id. read content from current buffer
@@ -118,159 +164,92 @@ M.update_changed_fields = function(space, issue_id)
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local_issue = jui.markdown_to_issue(lines)
 
-	local job_read = curl.get(string.format("https://%s/rest/api/2/issue/%s?expand=renderedFields", space, issue_id), {
-		auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
-		accept = "application/json",
-		callback = vim.schedule_wrap(function(out)
-			remote_issue = vim.json.decode(out.body)
-			remote_comments = remote_issue.fields.comment.comments
+	r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
+		remote_issue = vim.json.decode(out.body)
+		remote_comments = remote_issue.fields.comment.comments
 
-			-- abort update if remote issue is newer
-			if
-				str2time(remote_issue.fields.updated, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)(%+.-)$")
-				> str2time(local_issue.attributes.updated, "(%d+)-(%d+)-(%d+)T(%d+)_(%d+)_(%d+).(%d+)(%+.-)$")
-			then
-				vim.notify("Remote issue is newer", "error", { title = "Update error" })
-				-- TODO: show diff
-				is_changed = true
-				return
+		-- abort update if remote issue is newer
+		if
+			str2time(remote_issue.fields.updated, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)(%+.-)$")
+			> str2time(local_issue.attributes.updated, "(%d+)-(%d+)-(%d+)T(%d+)_(%d+)_(%d+).(%d+)(%+.-)$")
+		then
+			vim.notify("Remote issue is newer", "error", { title = "Update error" })
+			-- TODO: show diff
+			is_changed = true
+			return
+		end
+
+		-- update changed attributes
+		for _, field in ipairs(fields_to_update) do
+			if local_issue.attributes[field] ~= remote_issue.fields[field] then
+				body.fields[field] = local_issue.attributes[field]
+				break
 			end
+		end
+		-- update description
+		local job_update = nil
+		if local_issue.description ~= remote_issue.fields.description then
+			body.fields["description"] = local_issue.description
 
-			-- update changed attributes
-			for _, field in ipairs(fields_to_update) do
-				if local_issue.attributes[field] ~= remote_issue.fields[field] then
-					body.fields[field] = local_issue.attributes[field]
-					break
-				end
-			end
-			-- update description
-			if local_issue.description ~= remote_issue.fields.description then
-				body.fields["description"] = local_issue.description
-			end
-
-			local job_update = curl.put(string.format("https://%s/rest/api/2/issue/%s", space, issue_id), {
-				auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-				headers = {
-					content_type = "application/json",
-				},
-				body = vim.json.encode(body),
-				callback = vim.schedule_wrap(function(out)
-					if out.status == 204 then
-						vim.notify("Issue updated", "info", { title = "Update done" })
-					else
-						vim.notify("Error updating issue", "error", { title = "Update error" })
-					end
-				end),
-			})
-
-			-- updae status
-			local job_transit = nil
-			if local_issue.attributes["status"] ~= jui.status_to_icon(remote_issue.fields.status.name) then
-				job_transit = M.transit_issue(space, issue_id, local_issue.attributes["status"])
-			end
-
-			local job_redraw =
-				curl.get(string.format("https://%s/rest/api/2/issue/%s?expand=renderedFields", space, issue_id), {
-					auth = string.format(
-						"%s:%s",
-						jira.configs.spaces[space]["email"],
-						jira.configs.spaces[space]["token"]
-					),
-					accept = "application/json",
-					callback = vim.schedule_wrap(function(out)
-						issue = vim.json.decode(out.body)
-						comments = issue.fields.comment.comments
-						local newlines = jui.issue_to_markdown(issue, comments)
-
-						vim.notify("Issue " .. issue.key .. " redrawn")
-						vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
-					end),
-				})
-
-			Job.chain(job_update, job_transit, job_redraw)
-		end),
-	}):start()
-end
-
---- Transit issue with given issue_id to given status
----@param space
----@param issue_id
----@param target_status: str. Name like "To Do" or icon like "-" defined in ui.status_map
-M.transit_issue = function(space, issue_id, target_status)
-	local prj = string.match(issue_id, "[^-]+")
-	local map_by_prj = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.transits_path), ""))
-
-	local target_icon = nil
-	if target_status:len() < 2 then
-		target_icon = target_status
-	else
-		target_icon = jui.status_to_icon(target_status)
-	end
-
-	if map_by_prj[prj] ~= nil then
-		-- TODO: make it as an function
-		local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
-		local transition_id = map_by_prj[prj][prj_status]
-
-		return curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
-			auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-			headers = {
-				content_type = "application/json",
-			},
-			body = vim.json.encode({
-				transition = {
-					id = transition_id,
-				},
-			}),
-			callback = vim.schedule_wrap(function(out)
+			job_update = r.put(space, string.format("issue/%s", issue_id), vim.json.encode(body), function(out)
 				if out.status == 204 then
-					vim.notify("issue transition success", "info", { title = "Update done" })
+					vim.notify("Issue updated", "info", { title = "Update done" })
 				else
-					vim.pretty_print(out)
-					vim.notify("Error in issue transition", "error", { title = "Update error" })
+					vim.notify("Error updating issue", "error", { title = "Update error" })
 				end
-			end),
-		})
-	else
-		return curl.get(string.format("https://%s/rest/api/3/issue/%s/transitions", space, issue_id), {
-			auth = string.format("%s:%s", jira.configs.spaces[space]["email"], jira.configs.spaces[space]["token"]),
-			accept = "application/json",
-			callback = vim.schedule_wrap(function(out)
-				local response_table = vim.json.decode(out.body)
-				local transitions = {}
-				vim.pretty_print(response_table)
-				for _, v in ipairs(response_table.transitions) do
-					transitions[v.name] = v.id
-				end
-				map_by_prj[prj] = transitions
+			end)
+		end
 
-				vim.fn.writefile(vim.split(vim.json.encode(map_by_prj), "\n"), jira.opts.transits_path)
-				local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
-				local transition_id = map_by_prj[prj][prj_status]
+		-- update status
+		local job_transit = nil
+		if local_issue.attributes["status"] ~= jui.status_to_icon(remote_issue.fields.status.name) then
+			job_transit = M.transit_issue(space, issue_id, local_issue.attributes["status"])
+		end
 
-				local _ = curl.post(string.format("https://%s/rest/api/2/issue/%s/transitions", space, issue_id), {
-					auth = { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] },
-					headers = {
-						content_type = "application/json",
-					},
-					body = vim.json.encode({
-						transition = {
-							id = transition_id,
-						},
-					}),
-					callback = vim.schedule_wrap(function(out)
-						if out.status == 204 then
-							vim.notify("issue transition success", "info", { title = "Update done" })
-						else
-							vim.pretty_print(out)
-							vim.notify("Error in issue transition 2", "error", { title = "Update error" })
-							vim.pretty_print(out)
-						end
-					end),
-				}):start()
-			end),
-		})
-	end
+		-- -- update childs
+		-- for _, child in ipairs(local_issue.childs) do
+		-- 	-- create if not exist
+		-- 	if child.key == nil then
+		-- 		M.create_issue(
+		-- 			space,
+		-- 			vim.json.encode({
+		-- 				fields = {
+		-- 					project = {
+		-- 						key = local_issue.attributes["project"],
+		-- 					},
+		-- 					summary = child.summary,
+		-- 					issuetype = {
+		-- 						subtask = true,
+		-- 						name = "Sub-Task",
+		-- 					},
+		-- 					parent = {
+		-- 						key = local_issue.attributes["key"],
+		-- 					},
+		-- 				},
+		-- 			})
+		-- 		)
+		-- 	end
+		-- 	-- update if exist
+		-- end
+
+		-- redraw issue after updates
+		local job_redraw = r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
+			local updated_issue = vim.json.decode(out.body)
+			local updated_comments = updated_issue.fields.comment.comments
+			local newlines = jui.issue_to_markdown(updated_issue, updated_comments)
+
+			vim.notify("Issue " .. updated_issue.key .. " redrawn")
+			vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
+		end)
+
+		local jobs = { job_update, job_transit, job_redraw }
+		-- sekect non-nil jobs
+		jobs = vim.tbl_filter(function(job)
+			return job ~= nil
+		end, jobs)
+
+		Job.chain(unpack(jobs))
+	end):start()
 end
 
 M.test = function()
@@ -279,6 +258,11 @@ end
 
 M.test2 = function()
 	M.update_changed_fields("jungyong0615dot.atlassian.net", "PRD-155")
+
+	-- local issue_id = "PRD-155"
+	-- local status = "In Progress"
+	--
+	-- M.transit_issue("jungyong0615dot.atlassian.net", issue_id, status):start()
 end
 
 -- jui.open_float(jui.get_issue_template(jira.configs.templates[2]))
