@@ -46,7 +46,7 @@ M.query_issues = function(space, query)
 end
 
 M.create_issue = function(space, body)
-	r.post(space, "issue/", body, function(out)
+	return r.post(space, "issue/", body, function(out)
 		local issue = vim.json.decode(out.body)
 		vim.notify("Issue " .. issue.key .. " created", "info", { title = "Create done" })
 	end)
@@ -135,8 +135,19 @@ M.transit_issue = function(space, issue_id, target_status)
 	end
 end
 
+M.get_prj_ids = function(space)
+	return r.get(space, "project", function(out)
+		local prj_map = {}
+		local prjs = vim.json.decode(out.body)
+		for _, v in ipairs(prjs) do
+			prj_map[v.key] = v.id
+		end
+		vim.fn.writefile(vim.split(vim.json.encode(prj_map), "\n"), jira.opts.prjmap_path)
+	end)
+end
+
 M.get_issue_types = function(space, project)
-	r.get(space, string.format("issuetype/project?projectId=%s", project), function(out)
+	return r.get(space, string.format("issuetype/project?projectId=%s", project), function(out)
 		local response_table = vim.json.decode(out.body)
 		local issue_types = {}
 		for _, v in ipairs(response_table) do
@@ -144,7 +155,7 @@ M.get_issue_types = function(space, project)
 			-- table.insert(issue_types, {}v.name)
 		end
 		vim.fn.writefile(vim.split(vim.json.encode(issue_types), "\n"), jira.opts.issuetypes_path)
-	end):start()
+	end)
 end
 
 --- Update issue with given issue_id. read content from current buffer
@@ -155,16 +166,25 @@ M.update_changed_fields = function(space, issue_id)
 	local fields_to_update = { "summary" }
 
 	local remote_issue = nil
-	local local_issue = nil
 	local remote_comments = nil
 	local local_comments = nil
 	local is_changed = false
 	local body = { fields = {} }
 
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-	local_issue = jui.markdown_to_issue(lines)
+	local local_issue = jui.markdown_to_issue(lines)
+	local local_prj_map = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.prjmap_path), ""))
+	local local_issue_types = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.issuetypes_path), ""))
 
-	r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
+	if local_prj_map[local_issue.attributes.project] == nil then
+		local job_prj = M.get_prj_ids(space)
+	end
+
+	if local_issue_types[local_issue.attributes.project] == nil then
+		local job_issuetype = M.get_issue_types(space, local_issue.attributes.project)
+	end
+
+	local job_update_all = r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
 		remote_issue = vim.json.decode(out.body)
 		remote_comments = remote_issue.fields.comment.comments
 
@@ -186,6 +206,8 @@ M.update_changed_fields = function(space, issue_id)
 				break
 			end
 		end
+    local jobs = {}
+
 		-- update description
 		local job_update = nil
 		if local_issue.description ~= remote_issue.fields.description then
@@ -199,38 +221,42 @@ M.update_changed_fields = function(space, issue_id)
 				end
 			end)
 		end
+    table.insert(jobs, job_update)
 
 		-- update status
 		local job_transit = nil
 		if local_issue.attributes["status"] ~= jui.status_to_icon(remote_issue.fields.status.name) then
 			job_transit = M.transit_issue(space, issue_id, local_issue.attributes["status"])
 		end
+    table.insert(jobs, job_transit)
 
-		-- -- update childs
-		-- for _, child in ipairs(local_issue.childs) do
-		-- 	-- create if not exist
-		-- 	if child.key == nil then
-		-- 		M.create_issue(
-		-- 			space,
-		-- 			vim.json.encode({
-		-- 				fields = {
-		-- 					project = {
-		-- 						key = local_issue.attributes["project"],
-		-- 					},
-		-- 					summary = child.summary,
-		-- 					issuetype = {
-		-- 						subtask = true,
-		-- 						name = "Sub-Task",
-		-- 					},
-		-- 					parent = {
-		-- 						key = local_issue.attributes["key"],
-		-- 					},
-		-- 				},
-		-- 			})
-		-- 		)
-		-- 	end
-		-- 	-- update if exist
-		-- end
+		-- update childs
+		for _, child in ipairs(local_issue.childs) do
+			-- create if not exist
+			if child.key == nil or child.key == "" then
+        print("create subtask")
+				local job_subt = M.create_issue(
+					space,
+					vim.json.encode({
+						fields = {
+							project = {
+								key = local_issue.attributes["project"],
+							},
+							summary = child.summary,
+							issuetype = {
+								subtask = true,
+								name = local_issue_types[local_issue.attributes.project]["field_subtask"],
+							},
+							parent = {
+								key = local_issue.attributes["key"],
+							},
+						},
+					})
+				)
+        table.insert(jobs, job_subt)
+			end
+			-- update if exist
+		end
 
 		-- redraw issue after updates
 		local job_redraw = r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
@@ -242,22 +268,31 @@ M.update_changed_fields = function(space, issue_id)
 			vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
 		end)
 
-		local jobs = { job_update, job_transit, job_redraw }
+    table.insert(jobs, job_redraw)
+
 		-- sekect non-nil jobs
 		jobs = vim.tbl_filter(function(job)
 			return job ~= nil
 		end, jobs)
 
 		Job.chain(unpack(jobs))
-	end):start()
+	end)
+
+	local all_jobs = { job_prj, job_issuetype, job_update_all }
+
+	all_jobs = vim.tbl_filter(function(job)
+		return job ~= nil
+	end, all_jobs)
+
+	Job.chain(unpack(all_jobs))
 end
 
 M.test = function()
-	M.open_issue("jungyong0615dot.atlassian.net", "PRD-155")
+	M.open_issue("jungyong0615dot.atlassian.net", "PRD-137")
 end
 
 M.test2 = function()
-	M.update_changed_fields("jungyong0615dot.atlassian.net", "PRD-155")
+	M.update_changed_fields("jungyong0615dot.atlassian.net", "PRD-137")
 
 	-- local issue_id = "PRD-155"
 	-- local status = "In Progress"
