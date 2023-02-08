@@ -9,8 +9,13 @@ local conf = require("telescope.config").values
 local ts_utils = require("telescope.utils")
 local defaulter = ts_utils.make_default_callable
 
+local tprint = require("tprint")
+
 local Path = require("plenary.path")
 local jira = require("jira")
+
+vim.api.nvim_set_hl(0, "JiraDone", { fg = "#7fffd4" })
+vim.api.nvim_set_hl(0, "JiraInProgress", { fg = "#0084ff" })
 
 local status_map = {
 	[" "] = { "To Do", "TO DO", "TODO", "To DO", "TO Do" },
@@ -268,6 +273,37 @@ M.issues_picker = function(issues)
 		:find()
 	return
 end
+
+M.issue_table = function(issues)
+	local table_rows = {}
+	for _, issue in ipairs(issues.issues) do
+		table.insert(table_rows, {
+			-- parent = issue.fields.parent.key,
+			key = issue.key,
+			summary = issue.fields.summary,
+			status = "[" .. M.status_to_icon(issue.fields.status.name) .. "]",
+		})
+	end
+
+	local table_string =
+		tostring(tprint(table_rows, { column = { "key", "summary", "status" }, frame = tprint.FRAME_DOUBLE }))
+
+	vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(table_string, "\n"))
+	vim.cmd("set nowrap")
+	vim.b.space = space
+
+	for idx, issue in ipairs(issues.issues) do
+		if M.status_to_icon(issue.fields.status.name) == "o" then
+			vim.api.nvim_buf_add_highlight(0, 0, "JiraDone", idx + 2, 0, -1)
+		elseif M.status_to_icon(issue.fields.status.name) == "-" then
+			vim.api.nvim_buf_add_highlight(0, 0, "JiraInProgress", idx + 2, 0, -1)
+		end
+	end
+
+	return
+end
+
+
 
 local fillstr = function(text)
 	return text or ""
