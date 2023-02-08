@@ -288,15 +288,19 @@ M.issue_table = function(issues)
 	local table_string =
 		tostring(tprint(table_rows, { column = { "key", "summary", "status" }, frame = tprint.FRAME_DOUBLE }))
 
-	vim.api.nvim_buf_set_lines(0, 0, -1, false, vim.split(table_string, "\n"))
+
+  vim.t.jira_table_buf = vim.t.jira_table_buf or vim.api.nvim_get_current_buf()
+
+	vim.api.nvim_buf_set_lines(vim.t.jira_table_buf, 0, -1, false, vim.split(table_string, "\n"))
+
 	vim.cmd("set nowrap")
-	vim.b.space = space
+	vim.b.jira_space = space
 
 	for idx, issue in ipairs(issues.issues) do
 		if M.status_to_icon(issue.fields.status.name) == "o" then
-			vim.api.nvim_buf_add_highlight(0, 0, "JiraDone", idx + 2, 0, -1)
+			vim.api.nvim_buf_add_highlight(vim.t.jira_table_buf, 0, "JiraDone", idx + 2, 0, -1)
 		elseif M.status_to_icon(issue.fields.status.name) == "-" then
-			vim.api.nvim_buf_add_highlight(0, 0, "JiraInProgress", idx + 2, 0, -1)
+			vim.api.nvim_buf_add_highlight(vim.t.jira_table_buf, 0, "JiraInProgress", idx + 2, 0, -1)
 		end
 	end
 
