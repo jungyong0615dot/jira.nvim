@@ -43,7 +43,6 @@ M.issue_to_markdown = function(issue, comments)
 	local attribute_lines = M.parse_attributes(issue)
 	local desc_lines = M.parse_description(issue)
 	local childs_lines = M.parse_childs(issue)
-	-- TODO: issue already incudes comments
 	local comment_lines = M.parse_comments(comments)
 
 	for _, section_lines in ipairs({ attribute_lines, desc_lines, childs_lines, comment_lines }) do
@@ -397,9 +396,6 @@ M.markdown_to_issue = function(lines)
 			issuetype = {
 				name = "Task",
 			},
-			-- parent = {
-			-- 	key = attributes["parent"],
-			-- },
 			assignee = nil,
 			description = table.concat(sections[2], "\n"),
 		},

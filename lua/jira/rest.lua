@@ -14,8 +14,6 @@ end
 
 M.encodeURI = function (str)
 
--- vim.pretty_print(encodeURI('project = Productivity AND type = Task AND status !=Closed ORDER BY lastViewed DESC'))
-  
   if (str) then
     str = string.gsub (str, "\n", "\r\n")
     str = string.gsub (str, "([^%w ])",
