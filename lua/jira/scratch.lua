@@ -51,12 +51,12 @@ end
 M.query_issues = function(space, query)
 	local issues = nil
 
-	r.get(space, string.format("search?jql=%s", query), function(out)
+	return r.get(space, string.format("search?jql=%s", query), function(out)
 		issues = vim.json.decode(out.body)
 		jui.issue_table(issues)
 		vim.b.jira_space = space
 		vim.t.jira_query = query
-	end):start()
+	end)
 end
 
 M.create_issue = function(space, body)
@@ -187,8 +187,9 @@ end
 ---@param issue_id
 ---@param out
 M.update_changed_fields = function(space, issue_id)
-	local fields_to_update = { "summary" }
+	local fields_to_update = { "summary", "priority" }
 
+	local all_jobs = {}
 	local remote_issue = nil
 	local remote_comments = nil
 	local local_comments = nil
@@ -197,6 +198,40 @@ M.update_changed_fields = function(space, issue_id)
 
 	local lines = vim.api.nvim_buf_get_lines(0, 0, -1, false)
 	local local_issue = jui.markdown_to_issue(lines)
+
+	if issue_id == "UNDEFINED" then
+		table.insert(
+			all_jobs,
+			M.create_issue(
+				space,
+				vim.json.encode({
+					fields = {
+						project = {
+							key = local_issue.attributes["project"],
+						},
+						summary = local_issue.attributes["summary"],
+						assignee = {},
+						issuetype = {
+							name = "Task",
+						},
+						description = local_issue.description,
+						parent = {
+							key = local_issue.attributes["parent"],
+						},
+					},
+				})
+			)
+		)
+
+		if vim.t.jira_query ~= nil then
+			table.insert(all_jobs, M.query_issues(space, vim.t.jira_query))
+		end
+
+		Job.chain(unpack(vim.tbl_filter(function(job)
+			return job ~= nil
+		end, all_jobs)))
+		return
+	end
 
 	local local_prj_map = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.prjmap_path), ""))
 
@@ -216,8 +251,8 @@ M.update_changed_fields = function(space, issue_id)
 
 		-- abort update if remote issue is newer
 		if
-			str2time(remote_issue.fields.updated, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)(%+.-)$")
-			> str2time(local_issue.attributes.updated, "(%d+)-(%d+)-(%d+)T(%d+)_(%d+)_(%d+).(%d+)(%+.-)$")
+			str2time(remote_issue.fields.updated, "(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+).(%d+)")
+			> str2time(local_issue.attributes.updated, "(%d+)-(%d+)-(%d+)T(%d+)_(%d+)_(%d+).(%d+)")
 		then
 			vim.notify("Remote issue is newer", "error", { title = "Update error" })
 			-- TODO: show diff
@@ -225,25 +260,36 @@ M.update_changed_fields = function(space, issue_id)
 			return
 		end
 
+		local is_updated = false
 		-- update changed attributes
-		for _, field in ipairs(fields_to_update) do
-			if local_issue.attributes[field] ~= remote_issue.fields[field] then
-				body.fields[field] = local_issue.attributes[field]
-				break
-			end
+		-- for _, field in ipairs(fields_to_update) do
+		if local_issue.attributes["summary"] ~= remote_issue.fields["summary"] then
+			body.fields["summary"] = local_issue.attributes["summary"]
+			is_updated = true
 		end
+
+		if local_issue.attributes["priority"] ~= remote_issue.fields.priority["name"] then
+			body.fields["priority"] = { name = local_issue.attributes["priority"] }
+			is_updated = true
+		end
+
+		-- end
 		local jobs = {}
 
 		-- update description
 		local job_update = nil
 		if local_issue.description ~= remote_issue.fields.description then
 			body.fields["description"] = local_issue.description
+			is_updated = true
+		end
 
+		if is_updated then
 			job_update = r.put(space, string.format("issue/%s", issue_id), vim.json.encode(body), function(out)
 				if out.status == 204 then
 					vim.notify("Issue updated", "info", { title = "Update done" })
 				else
 					vim.notify("Error updating issue", "error", { title = "Update error" })
+					vim.pretty_print(out)
 				end
 			end)
 		end
@@ -271,6 +317,7 @@ M.update_changed_fields = function(space, issue_id)
 								key = local_issue.attributes["project"],
 							},
 							summary = child.summary,
+							assignee = {},
 							issuetype = {
 								subtask = true,
 								name = local_issue_types[local_issue.attributes.project]["field_subtask"],
@@ -318,7 +365,7 @@ M.update_changed_fields = function(space, issue_id)
 			vim.notify("Issue " .. updated_issue.key .. " redrawn")
 			vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
 			if vim.t.jira_query ~= nil then
-				M.query_issues(space, vim.t.jira_query)
+				M.query_issues(space, vim.t.jira_query):start()
 			end
 		end)
 
@@ -332,7 +379,7 @@ M.update_changed_fields = function(space, issue_id)
 		Job.chain(unpack(jobs))
 	end)
 
-	local all_jobs = { job_prj, job_issuetype, job_update_all }
+	all_jobs = { job_prj, job_issuetype, job_update_all }
 
 	all_jobs = vim.tbl_filter(function(job)
 		return job ~= nil
@@ -350,7 +397,6 @@ M.open_issue_in_table = function()
 	issue_id = string.gsub(issue_id, "^%s*(.-)%s*$", "%1")
 	M.open_issue(vim.b.jira_space, issue_id)
 end
-
 
 M.pick_jql = function()
 	local config = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.config_path), ""))
@@ -377,7 +423,7 @@ M.pick_jql = function()
 				actions.select_default:replace(function()
 					local selection = actions_state.get_selected_entry()
 					actions.close(prompt_bufnr)
-					M.query_issues(selection.space, r.encodeURI(selection.jql))
+					M.query_issues(selection.space, r.encodeURI(selection.jql)):start()
 				end)
 				return true
 			end,
@@ -385,10 +431,82 @@ M.pick_jql = function()
 		:find()
 end
 
+M.create_issue_from_template = function()
+	local config = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.config_path), ""))
+
+	pickers
+		.new({}, {
+			prompt_title = "Predefined task template",
+			results_title = "templates",
+			finder = finders.new_table({
+				results = config["templates"],
+				entry_maker = function(entry)
+					return {
+						value = entry,
+						display = entry.display,
+						ordinal = entry.display,
+					}
+				end,
+			}),
+			sorter = conf.file_sorter({}),
+			default_selection_index = 1,
+			attach_mappings = function(prompt_bufnr)
+				actions.select_default:replace(function()
+					local selection = actions_state.get_selected_entry()
+					actions.close(prompt_bufnr)
+					M.open_task_template(selection.value)
+				end)
+				return true
+			end,
+		})
+		:find()
+
+	return results
+end
+
+M.open_task_template = function(entry)
+	prefix = entry["summary"] or ""
+	project = entry["project"] or ""
+	parent = entry["parent"] or ""
+	status = entry["status"] or ""
+	sprint = entry["sprint"] or ""
+	space = entry["space"] or ""
+	priority = entry["priority"] or ""
+
+	lines = {
+		"<!-- attributes -->",
+		"key:",
+		"summary:" .. prefix .. " ",
+		"project:" .. project,
+		"parent:" .. parent,
+		"status:" .. status,
+		"sprint:" .. sprint,
+		"space:" .. space,
+		"priority:" .. priority,
+		"updated:" .. os.date("%Y-%m-%d"),
+		"---",
+		"<!-- description -->",
+		"* issue description",
+		"---",
+		"<!-- childs -->",
+		"---",
+	}
+	vim.cmd("enew")
+	vim.b.jira_issue = "UNDEFINED"
+	vim.b.jira_space = space
+
+	vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
+end
+
+
 M.test = function()
+  vim.fn.writefile(vim.split(vim.json.encode({["PRD-2000"]={rank=10}}), "\n"), jira.opts.metadata_path)
+  vim.pretty_print(vim.json.decode(table.concat(vim.fn.readfile(jira.opts.metadata_path), "")))
+
 end
 
 M.test2 = function()
+	M.create_issue_from_template()
 	M.open_issue_in_table()
 end
 

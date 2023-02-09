@@ -17,7 +17,7 @@
 -- local bufnr = bufnr or 0
 -- local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
 --  local tmp1 = jui.markdown_to_issue(lines)
--- M.create_issue("jungyong0615dot.atlassian.net", tmp1.body)
+-- M.reate_issue("jungyong0615dot.atlassian.net", tmp1.body)
 -- vim.pretty_print(tmp1)
 -- M.delete_issue("jungyong0615dot.atlassian.net", 'PRD-41')
 --
