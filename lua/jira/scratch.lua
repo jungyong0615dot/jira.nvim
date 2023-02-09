@@ -1,5 +1,14 @@
 local M = {}
 
+local actions = require("telescope.actions")
+local actions_state = require("telescope.actions.state")
+local finders = require("telescope.finders")
+local pickers = require("telescope.pickers")
+local previewers = require("telescope.previewers")
+local conf = require("telescope.config").values
+local ts_utils = require("telescope.utils")
+local defaulter = ts_utils.make_default_callable
+
 local Job = require("plenary.job")
 local Path = require("plenary.path")
 local curl = require("custom_curl")
@@ -30,8 +39,8 @@ M.open_issue = function(space, issue_id)
 		local lines = jui.issue_to_markdown(issue, comments)
 
 		jui.open_float(lines)
-    vim.b.jira_issue = issue_id
-    vim.b.jira_space = space
+		vim.b.jira_issue = issue_id
+		vim.b.jira_space = space
 
 		vim.cmd("w! " .. (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
 
@@ -45,9 +54,8 @@ M.query_issues = function(space, query)
 	r.get(space, string.format("search?jql=%s", query), function(out)
 		issues = vim.json.decode(out.body)
 		jui.issue_table(issues)
-    vim.b.jira_space = space
-    vim.t.jira_query = query
-
+		vim.b.jira_space = space
+		vim.t.jira_query = query
 	end):start()
 end
 
@@ -118,7 +126,6 @@ M.transit_issue = function(space, issue_id, target_status)
 	end
 
 	if map_by_prj[prj] ~= nil then
-		-- TODO: make it as an function
 		local prj_status = jui.icon_to_status(target_icon, map_by_prj[prj])
 		local transition_id = map_by_prj[prj][prj_status]
 
@@ -310,9 +317,9 @@ M.update_changed_fields = function(space, issue_id)
 
 			vim.notify("Issue " .. updated_issue.key .. " redrawn")
 			vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
-      if vim.t.jira_query ~= nil then
-        M.query_issues(space, vim.t.jira_query)
-      end
+			if vim.t.jira_query ~= nil then
+				M.query_issues(space, vim.t.jira_query)
+			end
 		end)
 
 		table.insert(jobs, job_redraw)
@@ -334,75 +341,55 @@ M.update_changed_fields = function(space, issue_id)
 	Job.chain(unpack(all_jobs))
 end
 
-
 M.open_issue_in_table = function()
-
-  local tline = vim.api.nvim_buf_get_lines(0, 0, -1, false)
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local line = tline[cursor[1]]
-  local issue_id = vim.split(line, "║")[2]
-  -- trim whitespace
-  issue_id = string.gsub(issue_id, "^%s*(.-)%s*$", "%1")
+	local tline = vim.api.nvim_buf_get_lines(0, 0, -1, false)
+	local cursor = vim.api.nvim_win_get_cursor(0)
+	local line = tline[cursor[1]]
+	local issue_id = vim.split(line, "║")[2]
+	-- trim whitespace
+	issue_id = string.gsub(issue_id, "^%s*(.-)%s*$", "%1")
 	M.open_issue(vim.b.jira_space, issue_id)
 end
 
+
+M.pick_jql = function()
+	local config = vim.json.decode(table.concat(vim.fn.readfile(jira.opts.config_path), ""))
+
+	pickers
+		.new({}, {
+			prompt_title = "Predefined JQL filters",
+			results_title = "JQL",
+			finder = finders.new_table({
+				results = config["filters"],
+				entry_maker = function(entry)
+					return {
+						value = entry.display,
+						display = entry.display,
+						ordinal = entry.display,
+						jql = entry.jql,
+						space = entry.space,
+					}
+				end,
+			}),
+			sorter = conf.file_sorter({}),
+			default_selection_index = 1,
+			attach_mappings = function(prompt_bufnr)
+				actions.select_default:replace(function()
+					local selection = actions_state.get_selected_entry()
+					actions.close(prompt_bufnr)
+					M.query_issues(selection.space, r.encodeURI(selection.jql))
+				end)
+				return true
+			end,
+		})
+		:find()
+end
+
 M.test = function()
-  M.open_issue_in_table()
-
- --  local tline = vim.api.nvim_buf_get_lines(0, 0, -1, false)
- --  local cursor = vim.api.nvim_win_get_cursor(0)
- --  local line = tline[cursor[1] - 1]
- --  local issue_id = vim.split(line, "║")[2]
- --  vim.pretty_print(issue_id)
- --   
-	-- M.open_issue(vim.b.jira_space, issue_id)
-
-	-- M.open_issue("jungyong0615dot.atlassian.net", "PRD-137")
-	-- M.open_issue("jungyong0615dot.atlassian.net", "PRD-137")
-	-- M.get_issue_types("jungyong0615dot.atlassian.net", "PRD"):start()
 end
 
 M.test2 = function()
-  
-	M.query_issues(
-		"jungyong0615dot.atlassian.net",
-		'project%20%3D%20Productivity%20AND%20type%20%3D%20Task%20AND%20status%20!%3DClosed%20ORDER%20BY%20lastViewed%20DESC'
-	)
-  
-	-- M.query_issues(
-	-- 	"jungyong0615dot.atlassian.net",
-	-- 	'project%20%3D%20Productivity%20AND%20type%20%3D%20Task%20AND%20status%20!%3DClosed%20AND%20status%20%3D%20%22To%20Do%22%20ORDER%20BY%20lastViewed%20DESC'
-	-- )
-	-- M.update_changed_fields("jungyong0615dot.atlassian.net", "PRD-137")
-
-	-- local issue_id = "PRD-155"
-	-- local status = "In Progress"
-	--
-	-- M.transit_issue("jungyong0615dot.atlassian.net", issue_id, status):start()
+	M.open_issue_in_table()
 end
 
--- jui.open_float(jui.get_issue_template(jira.configs.templates[2]))
---
-
--- local bufnr = bufnr or 0
--- local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
---  local tmp1 = jui.markdown_to_issue(lines)
--- M.create_issue("jungyong0615dot.atlassian.net", tmp1.body)
--- vim.pretty_print(tmp1)
--- M.delete_issue("jungyong0615dot.atlassian.net", 'PRD-41')
---
---
--- M.open_issue('jungyong0615dot.atlassian.net', 'PRD-137')
--- M.update_issue('jungyong0615dot.atlassian.net', 'PRD-155', '{"fields":{"summary":"test"}}')
--- M.update_issue('jungyong0615dot.atlassian.net', 'PRD-155', '{"fields":{"description":"added desc"}}')
-
--- get_possible_transits("jungyong0615dot.atlassian.net", "PRD-155")
--- M.open_issue("jungyong0615dot.atlassian.net", "PRD-155")
--- M.get_possible_transits("jungyong0615dot.atlassian.net", "PRD-155")
-
--- local issue_id = "PRD-155"
--- local status = "In Progress"
---
--- M.transit_issue("jungyong0615dot.atlassian.net", issue_id, status)
---
 return M

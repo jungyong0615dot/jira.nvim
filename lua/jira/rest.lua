@@ -1,11 +1,8 @@
 local M = {}
 
-local Job = require("plenary.job")
-local Path = require("plenary.path")
 local curl = require("custom_curl")
 local defaults = require("jira.defaults")
 local jira = require("jira")
-local jui = require("jira.ui")
 
 local function get_auth(space, type)
 	if type == "get" then
@@ -14,6 +11,20 @@ local function get_auth(space, type)
 		return { [jira.configs.spaces[space]["email"]] = jira.configs.spaces[space]["token"] }
 	end
 end
+
+M.encodeURI = function (str)
+
+-- vim.pretty_print(encodeURI('project = Productivity AND type = Task AND status !=Closed ORDER BY lastViewed DESC'))
+  
+  if (str) then
+    str = string.gsub (str, "\n", "\r\n")
+    str = string.gsub (str, "([^%w ])",
+        function (c) return string.format ("%%%02X", string.byte(c)) end)
+    str = string.gsub (str, " ", "+")
+  end
+  return str	
+end
+
 
 M.get = function(space, url, callback)
 	return curl.get(string.format("https://%s/rest/api/2/%s", space, url), {
