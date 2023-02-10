@@ -40,7 +40,7 @@ M.open_issue = function(space, issue_id)
 
 		jui.open_float(lines)
 		vim.b.jira_issue = issue_id
-		vim.b.jira_space = space
+		vim.t.jira_space = space
 
 		vim.cmd("w! " .. (Path:new(jira.opts.path_issues) / issue.key .. ".md"))
 
@@ -54,7 +54,7 @@ M.query_issues = function(space, query)
 	return r.get(space, string.format("search?jql=%s", query), function(out)
 		issues = vim.json.decode(out.body)
 		jui.issue_table(issues)
-		vim.b.jira_space = space
+		vim.t.jira_space = space
 		vim.t.jira_query = query
 	end)
 end
@@ -395,7 +395,7 @@ M.open_issue_in_table = function()
 	local issue_id = vim.split(line, "║")[2]
 	-- trim whitespace
 	issue_id = string.gsub(issue_id, "^%s*(.-)%s*$", "%1")
-	M.open_issue(vim.b.jira_space, issue_id)
+	M.open_issue(vim.t.jira_space, issue_id)
 end
 
 M.pick_jql = function()
@@ -493,7 +493,7 @@ M.open_task_template = function(entry)
 	}
 	vim.cmd("enew")
 	vim.b.jira_issue = "UNDEFINED"
-	vim.b.jira_space = space
+	vim.t.jira_space = space
 
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
 end

@@ -322,7 +322,7 @@ M.issue_table = function(issues)
 	vim.api.nvim_buf_set_lines(vim.t.jira_table_buf, 0, -1, false, vim.split(table_string, "\n"))
 
 	vim.cmd("set nowrap")
-	vim.b.jira_space = space
+	vim.t.jira_space = space
 
 	for idx, issue in ipairs(issues.issues) do
 		if M.status_to_icon(issue.fields.status.name) == "o" then
