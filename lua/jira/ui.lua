@@ -24,6 +24,13 @@ local status_map = {
 	["x"] = { "Blocked", "BLOCKED", "WON'T DO", "ABANDONED", "ABANDON" },
 }
 
+local status_rank = {
+	["o"] = 10,
+	["x"] = 9,
+	["-"] = 8,
+	[" "] = 7,
+}
+
 function table.append(t1, t2)
 	for i = 1, #t2 do
 		t1[#t1 + 1] = t2[i]
@@ -155,6 +162,30 @@ M.parse_description = function(issue)
 	return lines
 end
 
+M.reorder_subtasks = function(subtasks)
+	local subtasks_sorted = {}
+
+	for i, v in ipairs(subtasks) do
+		local icon_rank = status_rank[M.status_to_icon(v.fields.status.name)]
+		local snum = vim.split(v.key, "-")[2]
+		local line = string.format("- [%s][%s]/'%s'", M.status_to_icon(v.fields.status.name), v.key, v.fields.summary)
+
+		table.insert(subtasks_sorted, { snum = tonumber(snum), line = line, icon_rank = icon_rank, summary=v.fields.summary })
+	end
+	table.sort(subtasks_sorted, function(n1, n2)
+		if n1.icon_rank ~= n2.icon_rank then
+			return n1.icon_rank > n2.icon_rank
+		elseif n1.summary:sub(1,1) ~= n2.summary:sub(1,1) then
+			return n1.summary:sub(1,1) < n2.summary:sub(1,1)
+		else
+			return n1.snum < n2.snum
+		end
+	end)
+
+	return subtasks_sorted
+end
+
+
 --- parse issue childs
 ---@param issue table
 ---@return table
@@ -165,9 +196,8 @@ M.parse_childs = function(issue)
 
 	local lines = { "<!-- childs -->" }
 	if issue.fields.subtasks ~= nil then
-		for _, v in ipairs(issue.fields.subtasks) do
-			line = string.format("- [%s][%s]/'%s'", M.status_to_icon(v.fields.status.name), v.key, v.fields.summary)
-			table.insert(lines, line)
+		for _, v in ipairs(M.reorder_subtasks(issue.fields.subtasks)) do
+			table.insert(lines, v.line)
 		end
 	end
 	lines[#lines + 1] = "---"
@@ -287,8 +317,7 @@ M.issue_table = function(issues)
 	local table_string =
 		tostring(tprint(table_rows, { column = { "key", "summary", "status" }, frame = tprint.FRAME_DOUBLE }))
 
-
-  vim.t.jira_table_buf = vim.t.jira_table_buf or vim.api.nvim_get_current_buf()
+	vim.t.jira_table_buf = vim.t.jira_table_buf or vim.api.nvim_get_current_buf()
 
 	vim.api.nvim_buf_set_lines(vim.t.jira_table_buf, 0, -1, false, vim.split(table_string, "\n"))
 
@@ -305,8 +334,6 @@ M.issue_table = function(issues)
 
 	return
 end
-
-
 
 local fillstr = function(text)
 	return text or ""

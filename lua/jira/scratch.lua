@@ -498,16 +498,17 @@ M.open_task_template = function(entry)
 	vim.api.nvim_buf_set_lines(0, 0, -1, false, lines)
 end
 
-
 M.test = function()
-  vim.fn.writefile(vim.split(vim.json.encode({["PRD-2000"]={rank=10}}), "\n"), jira.opts.metadata_path)
-  vim.pretty_print(vim.json.decode(table.concat(vim.fn.readfile(jira.opts.metadata_path), "")))
-
+	-- vim.fn.writefile(vim.split(vim.json.encode({["PRD-2000"]={rank=10}}), "\n"), jira.opts.metadata_path)
+	-- vim.pretty_print(vim.json.decode(table.concat(vim.fn.readfile(jira.opts.metadata_path), "")))
+	-- jui.
+  M.open_issue("jungyong0615dot.atlassian.net", "PRD-81")
 end
 
 M.test2 = function()
-	M.create_issue_from_template()
-	M.open_issue_in_table()
+  jui.change_issue_order("up")
+	-- M.create_issue_from_template()
+	-- M.open_issue_in_table()
 end
 
 return M
