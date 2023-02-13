@@ -17,6 +17,25 @@ local jira = require("jira")
 local jui = require("jira.ui")
 local r = require("jira.rest")
 
+vim.notify = require("notify")
+vim.notify.setup({
+	background_colour = "Normal",
+	fps = 30,
+	icons = {
+		DEBUG = "",
+		ERROR = "",
+		INFO = "",
+		TRACE = "✎",
+		WARN = "",
+	},
+	level = 2,
+	minimum_width = 10,
+	render = "compact",
+	stages = "static",
+	timeout = 2000,
+	top_down = true,
+})
+
 local function convert_time_format(str, from, to)
 	local year, month, day, hour, min, sec, msec, tz = string.match(str, from)
 	return string.format(to, year, month, day, hour, min, sec, msec, tz)
@@ -27,6 +46,15 @@ local function str2time(str, format)
 
 	local t = os.time({ year = year, month = month, day = day, hour = hour, min = min, sec = sec })
 	return t
+end
+
+local function table_contains(table, value)
+	for _, v in ipairs(table) do
+		if v == value then
+			return true
+		end
+	end
+	return false
 end
 
 M.open_issue = function(space, issue_id)
@@ -187,6 +215,7 @@ end
 ---@param issue_id
 ---@param out
 M.update_changed_fields = function(space, issue_id)
+	local jbufnr = vim.api.nvim_get_current_buf()
 	local fields_to_update = { "summary", "priority" }
 
 	local all_jobs = {}
@@ -200,6 +229,8 @@ M.update_changed_fields = function(space, issue_id)
 	local local_issue = jui.markdown_to_issue(lines)
 
 	if issue_id == "UNDEFINED" then
+    -- delete buffer
+    vim.api.nvim_buf_delete(jbufnr, { force = true })
 		table.insert(
 			all_jobs,
 			M.create_issue(
@@ -357,19 +388,24 @@ M.update_changed_fields = function(space, issue_id)
 		end
 
 		-- redraw issue after updates
-		local job_redraw = r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
-			local updated_issue = vim.json.decode(out.body)
-			local updated_comments = updated_issue.fields.comment.comments
-			local newlines = jui.issue_to_markdown(updated_issue, updated_comments)
 
-			vim.notify("Issue " .. updated_issue.key .. " redrawn")
-			vim.api.nvim_buf_set_lines(0, 0, -1, false, newlines)
-			if vim.t.jira_query ~= nil then
-				M.query_issues(space, vim.t.jira_query):start()
-			end
-		end)
+		-- check if table includes value
 
-		table.insert(jobs, job_redraw)
+		if table_contains(vim.t.bufs, jbufnr) then
+			local job_redraw = r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
+				local updated_issue = vim.json.decode(out.body)
+				local updated_comments = updated_issue.fields.comment.comments
+				local newlines = jui.issue_to_markdown(updated_issue, updated_comments)
+
+				vim.notify("Issue " .. updated_issue.key .. " redrawn")
+				vim.api.nvim_buf_set_lines(jbufnr, 0, -1, false, newlines)
+				if vim.t.jira_query ~= nil then
+					M.query_issues(space, vim.t.jira_query):start()
+				end
+			end)
+
+			table.insert(jobs, job_redraw)
+		end
 
 		-- select non-nil jobs
 		jobs = vim.tbl_filter(function(job)
@@ -502,11 +538,11 @@ M.test = function()
 	-- vim.fn.writefile(vim.split(vim.json.encode({["PRD-2000"]={rank=10}}), "\n"), jira.opts.metadata_path)
 	-- vim.pretty_print(vim.json.decode(table.concat(vim.fn.readfile(jira.opts.metadata_path), "")))
 	-- jui.
-  M.open_issue("jungyong0615dot.atlassian.net", "PRD-81")
+	M.open_issue("jungyong0615dot.atlassian.net", "PRD-81")
 end
 
 M.test2 = function()
-  jui.change_issue_order("up")
+	jui.change_issue_order("up")
 	-- M.create_issue_from_template()
 	-- M.open_issue_in_table()
 end
