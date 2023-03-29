@@ -16,6 +16,7 @@ local jira = require("jira")
 
 vim.api.nvim_set_hl(0, "JiraDone", { fg = "#7fffd4" })
 vim.api.nvim_set_hl(0, "JiraInProgress", { fg = "#0084ff" })
+vim.api.nvim_set_hl(0, "JiraEpic", { fg = "#d703fc" })
 
 local status_map = {
 	[" "] = { "To Do", "TO DO", "TODO", "To DO", "TO Do" },
@@ -78,6 +79,13 @@ M.parse_attributes = function(issue)
 		assignee = ""
 	end
 
+
+	if type(issue.fields.duedate) == "userdata" then
+    duedate = ''
+  else
+    duedate = issue.fields.duedate
+	end
+
 	local lines = {
 		"<!-- attributes -->",
 		"key:" .. issue.key,
@@ -91,6 +99,7 @@ M.parse_attributes = function(issue)
 		"priority:" .. issue.fields.priority.name,
 		-- "updated:" .. issue.fields.updated,
 		"updated:" .. string.gsub(issue.fields.updated, "%:", "_"),
+    "duedate:" .. duedate,
 
 		"",
 		"---",
@@ -306,16 +315,25 @@ end
 M.issue_table = function(issues)
 	local table_rows = {}
 	for _, issue in ipairs(issues.issues) do
+
+    if type(issue.fields.duedate) == "userdata" then
+      duedate = ''
+    else
+      duedate = issue.fields.duedate
+    end
+
+
 		table.insert(table_rows, {
 			-- parent = issue.fields.parent.key,
 			key = issue.key,
 			summary = issue.fields.summary,
 			status = "[" .. M.status_to_icon(issue.fields.status.name) .. "]",
+      duedate = duedate,
 		})
 	end
 
 	local table_string =
-		tostring(tprint(table_rows, { column = { "key", "summary", "status" }, frame = tprint.FRAME_DOUBLE }))
+		tostring(tprint(table_rows, { column = { "key", "summary", "status", "duedate" }, frame = tprint.FRAME_DOUBLE }))
 
 	vim.t.jira_table_buf = vim.t.jira_table_buf or vim.api.nvim_get_current_buf()
 
@@ -325,8 +343,12 @@ M.issue_table = function(issues)
 	vim.t.jira_space = space
 
 	for idx, issue in ipairs(issues.issues) do
+    vim.pretty_print(issue.fields.issuetype.name)
+    vim.pretty_print(string.find(table.concat({"Epic", "에픽"}, ","), issue.fields.issuetype.name))
 		if M.status_to_icon(issue.fields.status.name) == "o" then
 			vim.api.nvim_buf_add_highlight(vim.t.jira_table_buf, 0, "JiraDone", idx + 2, 0, -1)
+    elseif string.find(table.concat({"Epic", "에픽"}, ","), issue.fields.issuetype.name) then
+			vim.api.nvim_buf_add_highlight(vim.t.jira_table_buf, 0, "JiraEpic", idx + 2, 0, -1)
 		elseif M.status_to_icon(issue.fields.status.name) == "-" then
 			vim.api.nvim_buf_add_highlight(vim.t.jira_table_buf, 0, "JiraInProgress", idx + 2, 0, -1)
 		end
@@ -341,7 +363,7 @@ end
 
 M.get_issue_template = function(info)
 	local attribute_lines = {}
-	for _, attribute in ipairs({ "summary", "project", "parent", "status", "sprint", "space", "priority", "updated" }) do
+	for _, attribute in ipairs({ "summary", "project", "parent", "status", "sprint", "space", "priority", "updated", "duedate" }) do
 		local line = string.format("%s:%s", attribute, fillstr(info[attribute]))
 		table.insert(attribute_lines, line)
 	end

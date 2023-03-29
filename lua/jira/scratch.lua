@@ -63,6 +63,9 @@ M.open_issue = function(space, issue_id)
 
 	r.get(space, string.format("issue/%s?expand=renderedFields", issue_id), function(out)
 		issue = vim.json.decode(out.body)
+
+    vim.fn.writefile({out.body}, issue_id .. ".json")
+
 		comments = issue.fields.comment.comments
 		local lines = jui.issue_to_markdown(issue, comments)
 
@@ -216,7 +219,7 @@ end
 ---@param out
 M.update_changed_fields = function(space, issue_id)
 	local jbufnr = vim.api.nvim_get_current_buf()
-	local fields_to_update = { "summary", "priority" }
+	local fields_to_update = { "summary", "priority", "duedate" }
 
 	local all_jobs = {}
 	local remote_issue = nil
@@ -302,6 +305,23 @@ M.update_changed_fields = function(space, issue_id)
 		if local_issue.attributes["priority"] ~= remote_issue.fields.priority["name"] then
 			body.fields["priority"] = { name = local_issue.attributes["priority"] }
 			is_updated = true
+		end
+
+    
+
+    if type(remote_issue.fields.duedate) == "userdata" then
+      duedate = ''
+    else
+      duedate = remote_issue.fields.duedate
+    end
+
+		if local_issue.attributes["duedate"] ~= duedate then
+      if local_issue.attributes["duedate"] == '' or local_issue.attributes["duedate"] == nil then
+        body.fields["duedate"] = '2030-12-31'
+      else
+        body.fields["duedate"] = local_issue.attributes["duedate"]
+      end
+      is_updated = true
 		end
 
 		-- end
@@ -508,6 +528,7 @@ M.open_task_template = function(entry)
 	sprint = entry["sprint"] or ""
 	space = entry["space"] or ""
 	priority = entry["priority"] or ""
+  duedate = entry["duedate"] or ""
 
 	lines = {
 		"<!-- attributes -->",
@@ -520,6 +541,7 @@ M.open_task_template = function(entry)
 		"space:" .. space,
 		"priority:" .. priority,
 		"updated:" .. os.date("%Y-%m-%d"),
+    "duedate:" .. duedate,
 		"---",
 		"<!-- description -->",
 		"* issue description",
